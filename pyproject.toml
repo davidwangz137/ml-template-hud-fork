@@ -21,6 +21,7 @@ dependencies = [
     "mteb>=1.12,<2",
     # Dev
     "pytest",
+    "ninja",
     "peft>=0.18.1",
     "qwen-vl-utils>=0.0.14",
     "modal>=1.3.5",

@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
+import importlib
+import math
 import os
 import statistics
-import math
 import sys
 from pathlib import Path
+
+
+def load_golden_forward():
+    """Load the repo-side tuned V2 reference without exposing it to the agent."""
+    src = Path(os.environ.get("SRC_DIR", "/mcp_server"))
+    ref_parent = src / "tasks" / "cuda_fi_block" / "reference_solution_files"
+    if not (ref_parent / "cuda_fusion_block" / "deepseek_block.py").is_file():
+        raise RuntimeError(f"missing cuda_fi_block golden reference at {ref_parent}")
+    sys.path.insert(0, str(ref_parent))
+    try:
+        module = importlib.import_module("cuda_fusion_block.deepseek_block")
+    finally:
+        try:
+            sys.path.remove(str(ref_parent))
+        except ValueError:
+            pass
+    return module.candidate_forward
 
 
 def main(argv: list[str]) -> int:
@@ -23,7 +41,8 @@ def main(argv: list[str]) -> int:
     os.environ.setdefault("TORCH_EXTENSIONS_DIR", str(ws / ".torch_extensions"))
     try:
         import torch
-        from torchtitan.experiments.cuda_fusion_block.deepseek_block import DeepSeekBlockShape, candidate_forward, clone_case, compiler_forward, eager_forward, make_inputs
+        from torchtitan.experiments.cuda_fusion_block.deepseek_block import DeepSeekBlockShape, candidate_forward, clone_case, eager_forward, make_inputs
+        golden_forward = load_golden_forward()
     except Exception as exc:
         print(f"import failed: {type(exc).__name__}: {exc}")
         return 1
@@ -49,28 +68,32 @@ def main(argv: list[str]) -> int:
         DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048),
     ]
     speedups = []
-    compiler_ratios = []
+    golden_ratios = []
     for i, shape in enumerate(shapes):
         x, weights, cos, sin = make_inputs(shape, seed=22000 + i)
-        eager = statistics.median(time_fn(eager_forward, x, weights, cos, sin) for _ in range(3))
-        compiler = statistics.median(time_fn(compiler_forward, x, weights, cos, sin) for _ in range(3))
-        cand = statistics.median(time_fn(candidate_forward, x, weights, cos, sin) for _ in range(3))
-        cand_vs_eager = eager / cand if cand > 0 else 0.0
-        cand_vs_compiler = compiler / cand if cand > 0 else 0.0
+        samples = []
+        for sample in range(3):
+            eager = statistics.median(time_fn(eager_forward, x, weights, cos, sin) for _ in range(3))
+            golden = statistics.median(time_fn(golden_forward, x, weights, cos, sin) for _ in range(3))
+            cand = statistics.median(time_fn(candidate_forward, x, weights, cos, sin) for _ in range(3))
+            cand_vs_eager = eager / cand if cand > 0 else 0.0
+            cand_vs_golden = golden / cand if cand > 0 else 0.0
+            samples.append((cand_vs_golden, cand_vs_eager, eager, golden, cand))
+            print(f"sample={sample} shape={shape} eager_ms={eager:.4f} golden_ms={golden:.4f} candidate_ms={cand:.4f} cand_vs_eager={cand_vs_eager:.3f} cand_vs_golden={cand_vs_golden:.3f}")
+        cand_vs_golden, cand_vs_eager, eager, golden, cand = sorted(samples, key=lambda s: s[0])[len(samples) // 2]
         speedups.append(cand_vs_eager)
-        compiler_ratios.append(cand_vs_compiler)
-        print(f"shape={shape} eager_ms={eager:.4f} compiler_ms={compiler:.4f} candidate_ms={cand:.4f} cand_vs_eager={cand_vs_eager:.3f} cand_vs_compiler={cand_vs_compiler:.3f}")
+        golden_ratios.append(cand_vs_golden)
+        print(f"selected shape={shape} eager_ms={eager:.4f} golden_ms={golden:.4f} candidate_ms={cand:.4f} cand_vs_eager={cand_vs_eager:.3f} cand_vs_golden={cand_vs_golden:.3f}")
         if cand_vs_eager > 50.0:
             print(f"untrusted speedup over 50x for {shape}; possible reward hacking")
             return 1
 
     geomean_speedup = math.prod(max(s, 1e-6) for s in speedups) ** (1.0 / len(speedups))
-    geomean_vs_compiler = math.prod(max(s, 1e-6) for s in compiler_ratios) ** (1.0 / len(compiler_ratios))
-    # Continuous reward: 1.0 at 5x geomean speedup over eager, clamped.
-    # Better-than-reference solutions earn more until the cap; correctness is
-    # enforced by separate parity/no-FlashInfer/provenance graders.
-    score = max(0.0, min(1.0, geomean_speedup / 5.0))
-    print(f"geomean_speedup_vs_eager={geomean_speedup:.4f} geomean_vs_compiler={geomean_vs_compiler:.4f}")
+    geomean_vs_golden = math.prod(max(s, 1e-6) for s in golden_ratios) ** (1.0 / len(golden_ratios))
+    # Continuous reward: 1.0 when the candidate matches or beats the tuned V2
+    # golden implementation, partial credit in proportion to golden/candidate.
+    score = max(0.0, min(1.0, geomean_vs_golden))
+    print(f"geomean_speedup_vs_eager={geomean_speedup:.4f} geomean_vs_golden={geomean_vs_golden:.4f}")
     print(f"SCORE: {score:.6f}")
     return 0
 

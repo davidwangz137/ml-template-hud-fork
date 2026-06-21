@@ -1,1 +1,1 @@
-"""FlashInfer-backed DeepSeek block CUDA fusion task."""
+"""DeepSeek block CUDA fusion task."""

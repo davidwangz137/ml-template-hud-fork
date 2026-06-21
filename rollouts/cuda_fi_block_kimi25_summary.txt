@@ -1,0 +1,30 @@
+cuda_fi_block kimi-k2.5 rollout
+
+workspace=/tmp/hud_workspace_kimi25
+
+steps=/tmp/local_run_cuda_fi_block_kimi25_steps.jsonl
+
+reward=0.45
+
+trace_status=completed stop_reason=max_steps
+
+result=starter fallback only; no successful edits or compile
+
+check_cuda_block_extension: exit=1
+
+stub extension still present
+
+check_cuda_block_no_flashinfer: exit=0
+
+block candidate runs with FlashInfer blocked
+
+check_cuda_block_parity: exit=0
+
+shape=DeepSeekBlockShape(seq=64, dim=256, heads=4, kv_heads=2, head_dim=64, ffn_hidden_dim=512, dtype=torch.bfloat16) max_eager=0 mean_eager=0 max_golden=0 mean_golden=0
+shape=DeepSeekBlockShape(seq=129, dim=512, heads=8, kv_heads=2, head_dim=64, ffn_hidden_dim=1536, dtype=torch.bfloat16) max_eager=0 mean_eager=0 max_golden=0.0078125 mean_golden=6.31162e-07
+shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) max_eager=0.03125 mean_eager=0.000430606 max_golden=0.0078125 mean_golden=2.30688e-07
+block parity passed
+
+check_cuda_block_speed: exit=1
+
+speed check requires real CUDA source

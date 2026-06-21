@@ -1,0 +1,40 @@
+$ uv run --project /home/wangd/code_hackathon/ml-template-hud-fork2 python /tmp/hud_workspace_opus48_clean/torchtitan/experiments/cuda_fusion_block/benchmark_deepseek_block.py
+exit_code=0
+
+STDOUT
+{
+  "results": [
+    {
+      "candidate_ms": 0.06842240095138549,
+      "candidate_vs_eager": 10.901833497192444,
+      "max_abs_vs_eager": 0.015625,
+      "mean_abs_vs_eager": 0.00018269149586558342,
+      "shape": {
+        "dim": 512,
+        "dtype": "torch.bfloat16",
+        "ffn_hidden_dim": 2048,
+        "head_dim": 64,
+        "heads": 8,
+        "kv_heads": 2,
+        "seq": 128
+      }
+    },
+    {
+      "candidate_ms": 0.19190720319747925,
+      "candidate_vs_eager": 3.810558391009559,
+      "max_abs_vs_eager": 0.03125,
+      "mean_abs_vs_eager": 0.0005638744914904237,
+      "shape": {
+        "dim": 768,
+        "dtype": "torch.bfloat16",
+        "ffn_hidden_dim": 3072,
+        "head_dim": 64,
+        "heads": 12,
+        "kv_heads": 3,
+        "seq": 257
+      }
+    }
+  ]
+}
+
+STDERR

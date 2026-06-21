@@ -1,0 +1,16 @@
+$ uv run python tasks/graders/check_cuda_block_speed.py /tmp/hud_workspace_opus48_clean
+exit_code=0
+
+STDOUT
+sample=0 shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.5283 golden_ms=0.1500 candidate_ms=0.1542 cand_vs_eager=3.426 cand_vs_golden=0.973
+sample=1 shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.6806 golden_ms=0.1524 candidate_ms=0.1549 cand_vs_eager=4.394 cand_vs_golden=0.984
+sample=2 shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7428 golden_ms=0.1642 candidate_ms=0.1668 cand_vs_eager=4.453 cand_vs_golden=0.984
+selected shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.6806 golden_ms=0.1524 candidate_ms=0.1549 cand_vs_eager=4.394 cand_vs_golden=0.984
+sample=0 shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7547 golden_ms=0.1723 candidate_ms=0.1735 cand_vs_eager=4.350 cand_vs_golden=0.993
+sample=1 shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.4963 golden_ms=0.1709 candidate_ms=0.1717 cand_vs_eager=2.890 cand_vs_golden=0.995
+sample=2 shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.4766 golden_ms=0.1673 candidate_ms=0.1695 cand_vs_eager=2.812 cand_vs_golden=0.987
+selected shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7547 golden_ms=0.1723 candidate_ms=0.1735 cand_vs_eager=4.350 cand_vs_golden=0.993
+geomean_speedup_vs_eager=4.3721 geomean_vs_golden=0.9884
+SCORE: 0.988440
+
+STDERR

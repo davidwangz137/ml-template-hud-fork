@@ -1,0 +1,37 @@
+cuda_fi_block claude-opus-4-8 clean rollout
+
+workspace=/tmp/hud_workspace_opus48_clean
+
+steps=/tmp/local_run_cuda_fi_block_opus48_clean_steps.jsonl
+
+reward=1.0
+
+trace_status=completed stop_reason=done
+
+check_cuda_block_extension: exit=0
+
+block extension passed
+
+check_cuda_block_no_flashinfer: exit=0
+
+block candidate runs with FlashInfer blocked
+
+check_cuda_block_parity: exit=0
+
+shape=DeepSeekBlockShape(seq=64, dim=256, heads=4, kv_heads=2, head_dim=64, ffn_hidden_dim=512, dtype=torch.bfloat16) max_eager=0.015625 mean_eager=4.48425e-05 max_golden=0 mean_golden=0
+shape=DeepSeekBlockShape(seq=129, dim=512, heads=8, kv_heads=2, head_dim=64, ffn_hidden_dim=1536, dtype=torch.bfloat16) max_eager=0.015625 mean_eager=0.000125528 max_golden=0 mean_golden=0
+shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) max_eager=0.03125 mean_eager=0.000469321 max_golden=0 mean_golden=0
+block parity passed
+
+check_cuda_block_speed: exit=0
+
+sample=0 shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7814 golden_ms=0.1578 candidate_ms=0.1535 cand_vs_eager=5.090 cand_vs_golden=1.028
+sample=1 shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.8024 golden_ms=0.1684 candidate_ms=0.1685 cand_vs_eager=4.762 cand_vs_golden=0.999
+sample=2 shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7415 golden_ms=0.1560 candidate_ms=0.1551 cand_vs_eager=4.781 cand_vs_golden=1.006
+selected shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7415 golden_ms=0.1560 candidate_ms=0.1551 cand_vs_eager=4.781 cand_vs_golden=1.006
+sample=0 shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.6190 golden_ms=0.1755 candidate_ms=0.1703 cand_vs_eager=3.636 cand_vs_golden=1.031
+sample=1 shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7485 golden_ms=0.1763 candidate_ms=0.1726 cand_vs_eager=4.338 cand_vs_golden=1.022
+sample=2 shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7389 golden_ms=0.1706 candidate_ms=0.1735 cand_vs_eager=4.258 cand_vs_golden=0.983
+selected shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) eager_ms=0.7485 golden_ms=0.1763 candidate_ms=0.1726 cand_vs_eager=4.338 cand_vs_golden=1.022
+geomean_speedup_vs_eager=4.5539 geomean_vs_golden=1.0138
+SCORE: 1.000000

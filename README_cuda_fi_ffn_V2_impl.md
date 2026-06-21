@@ -11,7 +11,7 @@ fused residual-add RMSNorm
 SwiGLU silu(gate) * up
 ```
 
-V2 (`cuda_fi_block`) makes the task more realistic: one inference-only DeepSeek-style decoder block with attention, RoPE, residuals, FFN, a FlashInfer reference path, and a raw-CUDA candidate path.
+V2 (`cuda_fi_block`) makes the task more realistic: one inference-only DeepSeek-style decoder block with attention, RoPE, residuals, FFN, a hidden tuned V2 reference, and a raw-CUDA candidate path.
 
 It is still not a full TileRT-class whole-model inference task. It is a bridge task: complex enough to require profiling and launch/layout decisions, but constrained enough that a handwritten CUDA reference solution can pass.
 
@@ -23,8 +23,7 @@ Task scaffold:
 tasks/cuda_fi_block/
   task.py
   __init__.py
-  00_cuda_flashinfer_deepseek_block.patch
-  reference_solution.diff
+  00_cuda_deepseek_block.patch
   reference_solution_files/cuda_fusion_block/
 ```
 
@@ -102,7 +101,7 @@ The local runner uses the repo `.venv` through `HUD_LOCAL_VENV` and binds local 
 The actual task patch is:
 
 ```text
-tasks/cuda_fi_block/00_cuda_flashinfer_deepseek_block.patch
+tasks/cuda_fi_block/00_cuda_deepseek_block.patch
 ```
 
 It stages this package into the agent workspace:
@@ -113,13 +112,9 @@ torchtitan/experiments/cuda_fusion_block/
 
 The staged CUDA files are stubs. The candidate must replace them.
 
-The known-good reference solution is separate:
-
-```text
-tasks/cuda_fi_block/reference_solution.diff
-```
-
-That diff applies on top of the staged task patch and replaces only the CUDA extension stubs with real kernels. It is intentionally not named `*.patch`, because HUD task setup loads every `*.patch` in the task directory.
+The known-good reference solution is kept as source files under
+`reference_solution_files/`. HUD does not apply `.diff` files during staging;
+only `*.patch` files are loaded into the agent workspace.
 
 ## Block computation
 
@@ -173,20 +168,20 @@ This is the semantic baseline.
 
 ### `compiler_forward`
 
-FlashInfer-backed reference path.
+PyTorch-only packed baseline retained for local profiling convenience.
 
 Uses:
 
 - packed QKV weight;
-- FlashInfer single prefill attention;
-- FlashInfer fused residual-add RMSNorm;
+- PyTorch SDPA;
 - packed gate/up weight;
-- FlashInfer SwiGLU;
-- warm `torch.compile(..., mode="reduce-overhead")` wrapping the FlashInfer/PyTorch reference block when possible.
+- PyTorch SwiGLU;
+- warm `torch.compile(..., mode="reduce-overhead")` when possible.
 
-This is called `compiler_forward` because it stands in for the high-performance library/compiler path. It is forbidden from the candidate path.
-
-Fairness rule: if the candidate uses warm `torch.compile`, the FlashInfer reference gets the same warm compile wrapper. In practice, FlashInfer's Python/JIT/custom-op stack causes graph breaks and warnings, so `torch.compile` helps it less than it helps the candidate. That is still the right comparison: both paths get the same inference graph-capture opportunity, and timing excludes warmup/compile.
+The graders no longer depend on FlashInfer. Hidden parity and speed scoring load
+the repo-side tuned V2 golden implementation from
+`tasks/cuda_fi_block/reference_solution_files/cuda_fusion_block/` and compare
+the mutable workspace candidate against that reference.
 
 ### `candidate_forward`
 
@@ -424,10 +419,10 @@ Checks:
 
 ### `check_cuda_block_parity.py`
 
-Hidden shapes compare candidate against both:
+Hidden shapes compare candidate against:
 
 - `eager_forward`;
-- `compiler_forward`.
+- the repo-side tuned V2 golden reference.
 
 Current tolerances:
 
@@ -436,20 +431,19 @@ max_abs <= 0.12
 mean_abs <= 0.02
 ```
 
-These are BF16-friendly and allow small differences between FlashInfer/PyTorch/custom CUDA accumulation order.
+These are BF16-friendly and allow small differences between PyTorch/custom CUDA accumulation order.
 
 ### `check_cuda_block_speed.py`
 
 Times full block paths with CUDA events.
 
-Current pass thresholds:
+Current scoring:
 
 ```text
-candidate <= 0.90 * eager
-candidate <= 1.30 * compiler
+score = clamp(geomean(golden_ms / candidate_ms), 0, 1)
 ```
 
-Timing excludes compile/warmup. Both `compiler_forward` and `candidate_forward` attempt `torch.compile(..., mode="reduce-overhead")`; warmup iterations absorb graph capture/compilation, and the timed loop measures steady-state execution. The candidate still has to pass with FlashInfer blocked, so it cannot win by calling the reference library.
+Timing excludes compile/warmup. The candidate still has to pass with FlashInfer blocked, so it cannot win by calling an external reference library.
 
 ## Clean validation result
 
@@ -462,25 +456,20 @@ block parity passed
 block speed passed
 ```
 
-Representative clean speed-grader timing after fair compile integration:
+Representative speed-grader timing from a clean run:
 
 ```text
-seq=257 dim=768 heads=12 kv_heads=3 hidden=2048
-  eager_ms=0.6347
-  compiler_ms=0.5300
-  candidate_ms=0.3231
-  candidate_vs_eager=1.964x
-  candidate_vs_compiler=1.640x
+shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048)
+  eager_ms=0.5571 golden_ms=0.1485 candidate_ms=0.1543 cand_vs_eager=3.611 cand_vs_golden=0.963
 
-seq=384 dim=768 heads=12 kv_heads=3 hidden=2048
-  eager_ms=1.0645
-  compiler_ms=0.8702
-  candidate_ms=0.3201
-  candidate_vs_eager=3.325x
-  candidate_vs_compiler=2.718x
+shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048)
+  eager_ms=1.1833 golden_ms=0.2353 candidate_ms=0.2290 cand_vs_eager=5.167 cand_vs_golden=1.027
+
+geomean_speedup_vs_eager=4.3196 geomean_vs_golden=0.9945
+SCORE: 0.994550
 ```
 
-This is now a much stronger optimized reference for V2. It is still not a theoretical optimum: attention uses PyTorch SDPA rather than a custom FlashAttention-style kernel, GEMMs are generic PyTorch GEMMs, and there is no GEMM epilogue fusion. But for these V2 shapes, warm compile applied to both sides plus custom CUDA fused ops and layout choices beats eager and the FlashInfer reference path.
+This is now a stronger optimized reference for V2. It is still not a theoretical optimum: attention uses PyTorch SDPA rather than a custom FlashAttention-style kernel, GEMMs are generic PyTorch GEMMs, and there is no GEMM epilogue fusion. But for these V2 shapes, the custom CUDA fused ops and layout choices beat eager substantially.
 
 ## Adopted faster HUD-agent reference
 
@@ -510,16 +499,14 @@ This is a valid inference optimization under the task rules: it does not call Fl
 Current adopted-reference speed-grader run:
 
 ```text
-seq=257 dim=768 heads=12 kv_heads=3 hidden=2048
-  eager_ms=0.6320 compiler_ms=0.6957 candidate_ms=0.1587
-  candidate_vs_eager=3.983x candidate_vs_compiler=4.384x
+shape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048)
+  eager_ms=0.5571 golden_ms=0.1485 candidate_ms=0.1543 cand_vs_eager=3.611 cand_vs_golden=0.963
 
-seq=384 dim=768 heads=12 kv_heads=3 hidden=2048
-  eager_ms=0.7526 compiler_ms=0.8031 candidate_ms=0.2273
-  candidate_vs_eager=3.311x candidate_vs_compiler=3.534x
+shape=DeepSeekBlockShape(seq=384, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048)
+  eager_ms=1.1833 golden_ms=0.2353 candidate_ms=0.2290 cand_vs_eager=5.167 cand_vs_golden=1.027
 
-geomean_speedup_vs_eager=3.6315
-geomean_vs_compiler=3.9361
+geomean_speedup_vs_eager=4.3196
+geomean_vs_golden=0.9945
 ```
 
 ## Continuous speed reward
@@ -535,8 +522,8 @@ The environment supports `score_stdout=True` graders and parses that line into t
 Current formula:
 
 ```text
-geomean_speedup = geometric_mean(eager_ms / candidate_ms over hidden shapes)
-speed_score = clamp(geomean_speedup / 5.0, 0.0, 1.0)
+geomean_vs_golden = geometric_mean(golden_ms / candidate_ms over hidden shapes)
+speed_score = clamp(geomean_vs_golden, 0.0, 1.0)
 ```
 
 Reward-hacking guard:
@@ -550,9 +537,30 @@ Correctness/provenance are still separate graders:
 
 - real CUDA extension;
 - no FlashInfer dependency in candidate;
-- numeric parity vs eager and compiler references.
+- numeric parity vs eager and the tuned V2 golden reference.
 
-This means a future agent can get more reward than the current adopted reference if it produces a faster legal implementation, up to the cap.
+This means a future agent can get full speed reward by matching or beating the current tuned golden reference.
+
+## Rollout learnings
+
+The rollout logs in `rollouts/` capture the main task-design findings:
+
+- `claude-opus-4-8` solved the fixed task end-to-end with real CUDA kernels.
+  The clean rollout scored `1.0`; a post-run lower-variance speed-grader rerun
+  scored `0.988440`.
+- `kimi-k2.5` scored `0.45`: it repeatedly inspected files but never invoked a
+  successful editing or shell tool, so the starter fallback remained in place.
+- `moonshotai/kimi-k2.7-code` also scored `0.45`: it attempted `write`,
+  `bash`, `apply_patch`, `run`, `execute`, and `edit_file`, but those names were
+  not available on HUD's `openai_compatible` agent path. It stopped after
+  concluding it lacked write/shell access.
+
+This matters when interpreting benchmark outcomes. Native Claude/OpenAI agents
+receive coding tools capable of editing and running builds. HUD
+`openai_compatible` models currently route through the chat-completions agent,
+whose built-in tool catalog is read/list/grep/glob plus MCP proxy; without a
+working shell/edit bridge, those models are testing the harness/tool interface as
+much as the CUDA task.
 
 ## Why V2 is more complex than V1
 

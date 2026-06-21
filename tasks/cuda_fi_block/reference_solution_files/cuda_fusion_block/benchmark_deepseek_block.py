@@ -14,7 +14,6 @@ try:
         DeepSeekBlockShape,
         candidate_forward,
         clone_case,
-        compiler_forward,
         eager_forward,
         make_inputs,
     )
@@ -27,7 +26,6 @@ except ModuleNotFoundError:
         DeepSeekBlockShape,
         candidate_forward,
         clone_case,
-        compiler_forward,
         eager_forward,
         make_inputs,
     )
@@ -73,18 +71,14 @@ def run_one(shape: DeepSeekBlockShape, seed: int, warmup: int, iters: int, repea
     x, weights, cos, sin = make_inputs(shape, seed)
     with torch.no_grad():
         eager = eager_forward(*clone_case(x, weights, cos, sin))
-        compiler = compiler_forward(*clone_case(x, weights, cos, sin))
         candidate = candidate_forward(*clone_case(x, weights, cos, sin))
     eager_times = []
-    compiler_times = []
     candidate_times = []
     for rep in range(repeats):
         rx, rw, rc, rs = make_inputs(shape, seed + 4099 * (rep + 1))
         eager_times.append(_time(eager_forward, rx, rw, rc, rs, warmup, iters))
-        compiler_times.append(_time(compiler_forward, rx, rw, rc, rs, warmup, iters))
         candidate_times.append(_time(candidate_forward, rx, rw, rc, rs, warmup, iters))
     eager_ms = statistics.median(eager_times)
-    compiler_ms = statistics.median(compiler_times)
     candidate_ms = statistics.median(candidate_times)
     return {
         "shape": {
@@ -98,14 +92,8 @@ def run_one(shape: DeepSeekBlockShape, seed: int, warmup: int, iters: int, repea
         },
         "max_abs_vs_eager": _max_abs(candidate, eager),
         "mean_abs_vs_eager": _mean_abs(candidate, eager),
-        "max_abs_vs_compiler": _max_abs(candidate, compiler),
-        "mean_abs_vs_compiler": _mean_abs(candidate, compiler),
-        "compiler_vs_eager_max_abs": _max_abs(compiler, eager),
-        "eager_ms": eager_ms,
-        "compiler_ms": compiler_ms,
         "candidate_ms": candidate_ms,
         "candidate_vs_eager": eager_ms / candidate_ms,
-        "candidate_vs_compiler": compiler_ms / candidate_ms,
     }
 
 

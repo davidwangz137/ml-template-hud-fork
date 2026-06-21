@@ -10,7 +10,7 @@ new file mode 100644
 index 0000000..1111111
 --- /dev/null
 +++ b/torchtitan/experiments/cuda_fusion_block/benchmark_deepseek_block.py
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,119 @@
 +"""Profile a DeepSeek-style single decoder block."""
 +
 +from __future__ import annotations
@@ -27,7 +27,6 @@ index 0000000..1111111
 +        DeepSeekBlockShape,
 +        candidate_forward,
 +        clone_case,
-+        compiler_forward,
 +        eager_forward,
 +        make_inputs,
 +    )
@@ -40,7 +39,6 @@ index 0000000..1111111
 +        DeepSeekBlockShape,
 +        candidate_forward,
 +        clone_case,
-+        compiler_forward,
 +        eager_forward,
 +        make_inputs,
 +    )
@@ -86,18 +84,14 @@ index 0000000..1111111
 +    x, weights, cos, sin = make_inputs(shape, seed)
 +    with torch.no_grad():
 +        eager = eager_forward(*clone_case(x, weights, cos, sin))
-+        compiler = compiler_forward(*clone_case(x, weights, cos, sin))
 +        candidate = candidate_forward(*clone_case(x, weights, cos, sin))
 +    eager_times = []
-+    compiler_times = []
 +    candidate_times = []
 +    for rep in range(repeats):
 +        rx, rw, rc, rs = make_inputs(shape, seed + 4099 * (rep + 1))
 +        eager_times.append(_time(eager_forward, rx, rw, rc, rs, warmup, iters))
-+        compiler_times.append(_time(compiler_forward, rx, rw, rc, rs, warmup, iters))
 +        candidate_times.append(_time(candidate_forward, rx, rw, rc, rs, warmup, iters))
 +    eager_ms = statistics.median(eager_times)
-+    compiler_ms = statistics.median(compiler_times)
 +    candidate_ms = statistics.median(candidate_times)
 +    return {
 +        "shape": {
@@ -111,14 +105,8 @@ index 0000000..1111111
 +        },
 +        "max_abs_vs_eager": _max_abs(candidate, eager),
 +        "mean_abs_vs_eager": _mean_abs(candidate, eager),
-+        "max_abs_vs_compiler": _max_abs(candidate, compiler),
-+        "mean_abs_vs_compiler": _mean_abs(candidate, compiler),
-+        "compiler_vs_eager_max_abs": _max_abs(compiler, eager),
-+        "eager_ms": eager_ms,
-+        "compiler_ms": compiler_ms,
 +        "candidate_ms": candidate_ms,
 +        "candidate_vs_eager": eager_ms / candidate_ms,
-+        "candidate_vs_compiler": compiler_ms / candidate_ms,
 +    }
 +
 +
@@ -180,7 +168,7 @@ new file mode 100644
 index 0000000..1111111
 --- /dev/null
 +++ b/torchtitan/experiments/cuda_fusion_block/custom_ops.py
-@@ -0,0 +1,113 @@
+@@ -0,0 +1,115 @@
 +"""Candidate-owned fused ops for the DeepSeek block CUDA-fusion task."""
 +
 +from __future__ import annotations
@@ -203,6 +191,8 @@ index 0000000..1111111
 +    if not cu.exists() or not cpp.exists():
 +        _EXTENSION = False
 +        return None
++    # Starter files intentionally contain this marker so the task begins with
++    # correct PyTorch fallbacks instead of loading an empty extension.
 +    if "Stub file for the CUDA fusion block HUD task" in cu.read_text(errors="ignore") + cpp.read_text(errors="ignore"):
 +        _EXTENSION = False
 +        return None
@@ -299,7 +289,7 @@ new file mode 100644
 index 0000000..1111111
 --- /dev/null
 +++ b/torchtitan/experiments/cuda_fusion_block/deepseek_block.py
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,236 @@
 +"""DeepSeek-style single decoder block for profiling-driven CUDA fusion."""
 +
 +from __future__ import annotations
@@ -446,19 +436,17 @@ index 0000000..1111111
 +    return x + hidden @ weights.w_down
 +
 +def _compiler_impl(x: torch.Tensor, weights: DeepSeekBlockWeights, cos: torch.Tensor, sin: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-+    import flashinfer
-+
 +    shape = DeepSeekBlockShape(seq=x.shape[0], dim=x.shape[1], heads=weights.w_q.shape[1] // cos.shape[1] // 2, kv_heads=weights.w_k.shape[1] // cos.shape[1] // 2, head_dim=cos.shape[1] * 2, ffn_hidden_dim=weights.w_gate.shape[1], dtype=x.dtype)
 +    normed = F.rms_norm(x.float(), (shape.dim,), weights.attn_norm_weight.float(), eps).to(x.dtype)
 +    q, k, v = _split_qkv(normed @ weights.w_qkv, shape)
 +    _rope_eager(q, k, cos, sin)
-+    attn = flashinfer.single_prefill_with_kv_cache(q[0], k[0], v[0], causal=True, kv_layout="NHD").reshape(shape.seq, -1)
++    attn = _sdpa(q, k, v, shape.heads != shape.kv_heads)
 +    attn_out = attn @ weights.w_o
-+    normed = attn_out.contiguous()
-+    residual = x.contiguous()
-+    flashinfer.fused_add_rmsnorm(normed, residual, weights.ffn_norm_weight, eps)
-+    gate_up = (normed @ weights.w_gate_up).contiguous()
-+    hidden = flashinfer.silu_and_mul(gate_up)
++    residual = x + attn_out
++    normed = F.rms_norm(residual.float(), (shape.dim,), weights.ffn_norm_weight.float(), eps).to(x.dtype)
++    gate_up = normed @ weights.w_gate_up
++    gate, up = gate_up.chunk(2, dim=-1)
++    hidden = (F.silu(gate.float()) * up.float()).to(x.dtype)
 +    return residual + hidden @ weights.w_down
 +
 +

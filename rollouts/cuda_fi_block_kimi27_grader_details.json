@@ -1,0 +1,22 @@
+{
+  "check_cuda_block_extension": {
+    "exit_code": 1,
+    "stdout": "stub extension still present\n",
+    "stderr": ""
+  },
+  "check_cuda_block_no_flashinfer": {
+    "exit_code": 0,
+    "stdout": "block candidate runs with FlashInfer blocked\n",
+    "stderr": ""
+  },
+  "check_cuda_block_parity": {
+    "exit_code": 0,
+    "stdout": "shape=DeepSeekBlockShape(seq=64, dim=256, heads=4, kv_heads=2, head_dim=64, ffn_hidden_dim=512, dtype=torch.bfloat16) max_eager=0 mean_eager=0 max_golden=0 mean_golden=0\nshape=DeepSeekBlockShape(seq=129, dim=512, heads=8, kv_heads=2, head_dim=64, ffn_hidden_dim=1536, dtype=torch.bfloat16) max_eager=0 mean_eager=0 max_golden=0.0078125 mean_golden=6.31162e-07\nshape=DeepSeekBlockShape(seq=257, dim=768, heads=12, kv_heads=3, head_dim=64, ffn_hidden_dim=2048, dtype=torch.bfloat16) max_eager=0.03125 mean_eager=0.000430606 max_golden=0.0078125 mean_golden=2.30688e-07\nblock parity passed\n",
+    "stderr": ""
+  },
+  "check_cuda_block_speed": {
+    "exit_code": 1,
+    "stdout": "speed check requires real CUDA source\n",
+    "stderr": ""
+  }
+}

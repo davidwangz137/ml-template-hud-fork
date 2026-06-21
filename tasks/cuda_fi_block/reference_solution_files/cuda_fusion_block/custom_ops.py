@@ -20,6 +20,8 @@ def _load_extension():
     if not cu.exists() or not cpp.exists():
         _EXTENSION = False
         return None
+    # Starter files intentionally contain this marker so the task begins with
+    # correct PyTorch fallbacks instead of loading an empty extension.
     if "Stub file for the CUDA fusion block HUD task" in cu.read_text(errors="ignore") + cpp.read_text(errors="ignore"):
         _EXTENSION = False
         return None

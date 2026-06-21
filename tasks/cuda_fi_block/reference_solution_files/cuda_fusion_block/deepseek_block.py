@@ -144,19 +144,17 @@ def eager_forward(x: torch.Tensor, weights: DeepSeekBlockWeights, cos: torch.Ten
     return x + hidden @ weights.w_down
 
 def _compiler_impl(x: torch.Tensor, weights: DeepSeekBlockWeights, cos: torch.Tensor, sin: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-    import flashinfer
-
     shape = DeepSeekBlockShape(seq=x.shape[0], dim=x.shape[1], heads=weights.w_q.shape[1] // cos.shape[1] // 2, kv_heads=weights.w_k.shape[1] // cos.shape[1] // 2, head_dim=cos.shape[1] * 2, ffn_hidden_dim=weights.w_gate.shape[1], dtype=x.dtype)
     normed = F.rms_norm(x.float(), (shape.dim,), weights.attn_norm_weight.float(), eps).to(x.dtype)
     q, k, v = _split_qkv(normed @ weights.w_qkv, shape)
     _rope_eager(q, k, cos, sin)
-    attn = flashinfer.single_prefill_with_kv_cache(q[0], k[0], v[0], causal=True, kv_layout="NHD").reshape(shape.seq, -1)
+    attn = _sdpa(q, k, v, shape.heads != shape.kv_heads)
     attn_out = attn @ weights.w_o
-    normed = attn_out.contiguous()
-    residual = x.contiguous()
-    flashinfer.fused_add_rmsnorm(normed, residual, weights.ffn_norm_weight, eps)
-    gate_up = (normed @ weights.w_gate_up).contiguous()
-    hidden = flashinfer.silu_and_mul(gate_up)
+    residual = x + attn_out
+    normed = F.rms_norm(residual.float(), (shape.dim,), weights.ffn_norm_weight.float(), eps).to(x.dtype)
+    gate_up = normed @ weights.w_gate_up
+    gate, up = gate_up.chunk(2, dim=-1)
+    hidden = (F.silu(gate.float()) * up.float()).to(x.dtype)
     return residual + hidden @ weights.w_down
 
 
