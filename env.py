@@ -1,5 +1,6 @@
 """HUD environment for ML training tasks built on torchtitan experiments."""
 
+import asyncio
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from typing import Any
 from hud import Environment
 from hud.environment import workspace as _ws_mod
 from hud.environment.workspace import DEFAULT_SYSTEM_MOUNTS, Mount
-from hud.graders import BashGrader, combine
+from hud.graders import BashGrader, SubScore, combine
 
 logger = logging.getLogger(__name__)
 MCP_TESTING_MODE = os.environ.get("MCP_TESTING_MODE") in ["1", "true"]
@@ -33,6 +34,7 @@ def bash(cmd: str, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     return result
 
 
+
 # Locations are overridable so the same env serves both the Modal/Docker image
 # (the defaults) and ad-hoc local runs.
 SRC_DIR = os.environ.get("HUD_SRC_DIR", "/mcp_server")
@@ -43,6 +45,87 @@ if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
 env = Environment(name="ml-template-1")
+
+
+def _patch_workspace_for_local_cuda() -> None:
+    """Bind WSL/NVIDIA device nodes into local bwrap shells when present."""
+    if not os.environ.get("HUD_LOCAL_VENV"):
+        return
+
+    from hud.environment.workspace import Workspace
+
+    if getattr(Workspace, "_ml_template_cuda_patch", False):
+        return
+
+    original_bwrap_argv = Workspace.bwrap_argv
+
+    def bwrap_argv_with_cuda(self, command, *, cwd=None, env=None):
+        argv = original_bwrap_argv(self, command, cwd=cwd, env=env)
+        devices = (
+            "/dev/dxg",          # WSL GPU device
+            "/dev/nvidiactl",
+            "/dev/nvidia0",
+            "/dev/nvidia-uvm",
+            "/dev/dri",
+        )
+        extra = []
+        for device in devices:
+            if Path(device).exists():
+                extra.extend(["--dev-bind-try", device, device])
+        if extra:
+            argv[argv.index("--clearenv"):argv.index("--clearenv")] = extra
+        return argv
+
+    Workspace.bwrap_argv = bwrap_argv_with_cuda
+    Workspace._ml_template_cuda_patch = True
+
+
+_patch_workspace_for_local_cuda()
+
+
+def _local_workspace_kwargs() -> dict[str, Any]:
+    """Expose the repo venv read-only inside the local bwrap workspace."""
+    venv = os.environ.get("HUD_LOCAL_VENV")
+    if not venv:
+        return {}
+
+    venv_path = Path(venv).resolve()
+    mounts = [Mount("ro", src=str(venv_path), dst=str(venv_path))]
+
+    # uv-created venvs often symlink .venv/bin/python through the uv-managed
+    # interpreter directory outside the repo. Mount the containing uv/python
+    # directory read-only so both the stable symlink path and the versioned
+    # interpreter target resolve inside bwrap.
+    python_bin = venv_path / "bin" / "python"
+    if python_bin.exists():
+        target = python_bin.resolve()
+        if not str(target).startswith(str(venv_path)):
+            mounts.append(Mount("ro", src=str(target.parents[2]), dst=str(target.parents[2])))
+
+    path = os.environ.get("PATH", "/usr/bin:/bin")
+    env_overrides = {
+        "PATH": f"{venv_path / 'bin'}:{path}",
+        "VIRTUAL_ENV": str(venv_path),
+        "PYTHONPATH": WORKSPACE,
+    }
+
+    # WSL exposes the NVIDIA userspace driver here. Harmless on non-WSL hosts
+    # where the path does not exist; PATH also lets nvidia-smi resolve locally.
+    if Path("/usr/lib/wsl/lib").is_dir():
+        env_overrides["PATH"] = f"{venv_path / 'bin'}:/usr/lib/wsl/lib:{path}"
+        ld_library_path = os.environ.get("LD_LIBRARY_PATH")
+        env_overrides["LD_LIBRARY_PATH"] = (
+            f"/usr/lib/wsl/lib:{ld_library_path}" if ld_library_path else "/usr/lib/wsl/lib"
+        )
+
+    return {"mounts": mounts, "env": env_overrides}
+
+
+_workspace_kwargs = _local_workspace_kwargs()
+if _workspace_kwargs:
+    # Register before legacy tool setup. The legacy SSH adapter skips creating
+    # its default workspace when an ssh capability already exists.
+    env.workspace(WORKSPACE, **_workspace_kwargs)
 
 AGENT_CONFIG = {
     "system_prompt": (
@@ -171,6 +254,47 @@ async def _probe_bwrap() -> None:
 # ===========================================================================
 
 
+async def _score_command_grader(g: dict[str, Any], weight: float) -> SubScore:
+    """Run a grader command that prints SCORE: <0..1> for partial credit."""
+    command = g["command"]
+    timeout_seconds = g.get("timeout", 10)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "/bin/bash",
+            "-lc",
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        stdout = stdout_bytes.decode(errors="replace")
+        stderr = stderr_bytes.decode(errors="replace")
+        exit_code = proc.returncode if proc.returncode is not None else 1
+    except TimeoutError:
+        return SubScore(
+            name=g.get("name"),
+            weight=weight,
+            value=0.0,
+            metadata={"exit_code": None, "stdout": "", "stderr": "", "timed_out": True, "timeout": timeout_seconds},
+        )
+
+    score = 0.0
+    if exit_code == 0:
+        for line in stdout.splitlines()[::-1]:
+            if line.startswith("SCORE:"):
+                try:
+                    score = max(0.0, min(1.0, float(line.split(":", 1)[1].strip())))
+                except ValueError:
+                    score = 0.0
+                break
+    return SubScore(
+        name=g.get("name"),
+        weight=weight,
+        value=score,
+        metadata={"exit_code": exit_code, "stdout": stdout, "stderr": stderr},
+    )
+
+
 async def _grade(graders: list[dict[str, Any]]):
     """Build an ``EvaluationResult`` from a list of grader dicts.
 
@@ -178,6 +302,7 @@ async def _grade(graders: list[dict[str, Any]]):
       - script-based: {name, script, _script_stem?, args?, weight?, timeout?}
         The script is written to /tmp/<stem>.py and the command auto-built.
       - command-based: {name, command, weight?, timeout?}  (runs as-is)
+      - partial-score command: add score_stdout=True and print SCORE: <0..1>.
 
     Graders run host-side via ``BashGrader`` with ``cwd=WORKSPACE`` so they see
     the agent's edits; ``combine`` normalizes the positive weights to sum to 1.
@@ -193,15 +318,18 @@ async def _grade(graders: list[dict[str, Any]]):
             command = g.get("command") or f"python /tmp/{stem}.py {g.get('args', '')}"
         else:
             command = g["command"]
-        subscores.append(
-            BashGrader.grade(
-                weight=g.get("weight", 1),
-                name=g.get("name"),
-                command=command,
-                cwd=WORKSPACE,
-                timeout_seconds=g.get("timeout", 10),
+        if g.get("score_stdout"):
+            subscores.append(_score_command_grader(g, g.get("weight", 1)))
+        else:
+            subscores.append(
+                BashGrader.grade(
+                    weight=g.get("weight", 1),
+                    name=g.get("name"),
+                    command=command,
+                    cwd=WORKSPACE,
+                    timeout_seconds=g.get("timeout", 10),
+                )
             )
-        )
     return await combine(*subscores)
 
 
@@ -212,15 +340,23 @@ async def _grade(graders: list[dict[str, Any]]):
 
 def _clean_workspace() -> None:
     """Empty the workspace while preserving HUD runtime state."""
-    os.makedirs(WORKSPACE, exist_ok=True)
-    for entry in os.listdir(WORKSPACE):
-        if entry == ".hud":
+    workspace_path = Path(WORKSPACE).expanduser().resolve()
+    src_path = Path(SRC_DIR).expanduser().resolve()
+    if (
+        workspace_path == Path("/").resolve()
+        or workspace_path == Path.home().resolve()
+        or src_path == workspace_path
+        or src_path.is_relative_to(workspace_path)
+    ):
+        raise RuntimeError(f"Refusing to clean unsafe WORKSPACE={workspace_path}")
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    for child in workspace_path.iterdir():
+        if child.name == ".hud":
             continue
-        path = Path(WORKSPACE) / entry
-        if path.is_symlink() or path.is_file():
-            path.unlink()
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
         else:
-            shutil.rmtree(path, ignore_errors=True)
+            child.unlink(missing_ok=True)
 
 
 def _setup_workspace(setup_command: str | None = None) -> None:
