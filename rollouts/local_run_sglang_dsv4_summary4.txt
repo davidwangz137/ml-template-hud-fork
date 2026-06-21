@@ -1,0 +1,25 @@
+HUD rollout summary: sglang_dsv4_indexer / gpt-5.5 / run 4
+
+Artifacts:
+- rollouts/local_run_sglang_dsv4_steps4.jsonl
+- rollouts/local_run_sglang_dsv4_trace4.json
+- rollouts/local_run_sglang_dsv4_grader4.txt
+
+Run command:
+uv run python local_runner.py --task sglang_dsv4_indexer --model gpt-5.5 --max-steps 30 --timeout 2400 --workspace /tmp/hud_workspace_sglang_dsv4_4 --stream-steps /tmp/local_run_sglang_dsv4_steps4.jsonl
+
+Result:
+- Completed without SSH disconnect.
+- Stop reason: done.
+- Grader exit code 0.
+- Reward 1.0.
+- Candidate passed tightened parity thresholds against SGLang.
+
+Performance:
+- shape 64x16: sglang_ms=0.1147, candidate_ms=0.0146, cand_vs_sglang=7.879
+- shape 256x16: sglang_ms=0.1125, candidate_ms=0.0149, cand_vs_sglang=7.547
+- geomean_vs_sglang=7.7110
+- SCORE=1.000000
+
+Interpretation:
+After fixing extension build fail-fast, staging sglang_jit_kernel, and tightening parity, the gpt-5.5 agent produced a valid high-performing CUDA solution. This rollout validates the DSV4 indexer HUD task as solvable and performance-sensitive.

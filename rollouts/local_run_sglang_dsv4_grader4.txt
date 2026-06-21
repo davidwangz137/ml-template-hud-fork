@@ -1,0 +1,17 @@
+Command:
+uv run python local_runner.py --task sglang_dsv4_indexer --model gpt-5.5 --max-steps 30 --timeout 2400 --workspace /tmp/hud_workspace_sglang_dsv4_4 --stream-steps /tmp/local_run_sglang_dsv4_steps4.jsonl
+
+Outcome:
+Reward: 1.0
+Trace status: completed
+Stop reason: done
+Grader exit: 0
+
+Grader stdout:
+shape=DSV4IndexerShape(batch=64, heads=16, head_dim=128, rope_dim=64, max_seq_len=8192, dtype='bfloat16') eager_ms=1.1237 compiler_ms=0.0953 sglang_ms=0.1147 candidate_ms=0.0146 cand_vs_eager=77.201 cand_vs_sglang=7.879 parity={'sglang_vs_eager_q_max': 32.0, 'sglang_vs_eager_q_mean': 0.15914775431156158, 'sglang_vs_eager_w_max': 4.93892002850771e-07, 'sglang_vs_eager_w_mean': 5.733199515134402e-08, 'candidate_vs_sglang_q_max': 0.00390625, 'candidate_vs_sglang_q_mean': 2.9802322387695312e-08, 'candidate_vs_sglang_w_max': 8.731149137020111e-11, 'candidate_vs_sglang_w_mean': 7.926742595643077e-12}
+shape=DSV4IndexerShape(batch=256, heads=16, head_dim=128, rope_dim=64, max_seq_len=8192, dtype='bfloat16') eager_ms=1.1621 compiler_ms=0.0878 sglang_ms=0.1125 candidate_ms=0.0149 cand_vs_eager=77.941 cand_vs_sglang=7.547 parity={'sglang_vs_eager_q_max': 32.0, 'sglang_vs_eager_q_mean': 0.158145934343338, 'sglang_vs_eager_w_max': 8.460483513772488e-07, 'sglang_vs_eager_w_mean': 5.2334591771341366e-08, 'candidate_vs_sglang_q_max': 0.001953125, 'candidate_vs_sglang_q_mean': 3.725290298461914e-09, 'candidate_vs_sglang_w_max': 1.1641532182693481e-10, 'candidate_vs_sglang_w_mean': 8.39530528429222e-12}
+geomean_speedup_vs_eager=77.5702 geomean_vs_sglang=7.7110
+SCORE: 1.000000
+
+Grader stderr:
+(empty)

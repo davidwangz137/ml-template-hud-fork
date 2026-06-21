@@ -1,78 +1,34 @@
-# ml-template
+# CUDA Kernel-Writing RL Env Tasks
 
-HUD evaluation environment for ML training tasks. 10 tasks across embedding retrieval, VLM, Flux diffusion, and MoE language models. All run on 1x H100 80GB via [pytorch/torchtitan](https://github.com/pytorch/torchtitan).
+This branch contains two HUD RL environment tasks for testing an agent's ability to write and optimize custom CUDA kernels against golden references.
 
-## Setup
+## Tasks
 
-```bash
-git clone git@github.com:hud-evals/ml-template.git
-cd ml-template
+### `cuda_fi_block`
 
-uv sync
-```
+A TorchTitan DeepSeek-style inference block task. The agent starts from a correct but slow PyTorch fallback and must implement raw CUDA fused ops for the candidate path. Graders check CUDA extension usage, FlashInfer avoidance, parity against eager plus a tuned V2 golden reference, and speed against that golden reference.
 
-## Running Tasks
+More detail: [`README_cuda_fi_ffn_V2_impl.md`](README_cuda_fi_ffn_V2_impl.md)
 
-```bash
-# Deploy once
-uv run modal deploy modal_runner.py
+### `sglang_dsv4_indexer`
 
-# Single task
-uv run python modal_runner.py --task emb_debug_multi
+An SGLang DeepSeek V4 indexer micro-kernel task. The agent implements RoPE, Hadamard transform, FP8 quantization, and weight-scale output in CUDA. Graders compare against the staged SGLang JIT path and a hidden golden CUDA reference.
 
-# Multiple tasks in parallel
-uv run python modal_runner.py --tasks emb_debug_multi,moe_debug_balance,flux_debug_timestep
+More detail: [`README_dsv4_indexer_task.md`](README_dsv4_indexer_task.md)
 
-# All tasks, 4 repeats each
-uv run python modal_runner.py --all --repeats 4 --model claude-opus-4-6
+## Rollouts
 
-# Evaluate a checkpoint on MTEB + local evals
-uv run python modal_runner.py --eval-checkpoint assets/checkpoints/scifact_base --eval-benchmarks SciFact --eval-local data/val.jsonl
-```
+Agent rollout logs and grader summaries are under [`rollouts/`](rollouts/). They document both successful and partial solutions.
 
-## Running Tests
+Examples:
 
-```bash
-# Structural tests (no GPU)
-uv run pytest tasks/tests/ -v
+- `cuda_fi_block`: Opus 4.8 solves the fixed task cleanly; Kimi openai-compatible runs expose the missing write/shell-tool issue on that agent path.
+- `sglang_dsv4_indexer`: GPT-5.5 run 6 reaches full reward after installing the SGLang JIT dependency (`tvm_ffi`). Opus 4.5 produces a valid CUDA solution but does not receive full hidden-golden reward because it misses the stronger golden topology: more element-wise parallelism, 128 threads per row, shared-memory coordination, and less redundant output writing.
 
-# GPU tests on Modal
-uv run modal deploy modal_runner.py
-uv run python modal_runner.py --test
-uv run python modal_runner.py --test --test-filter emb
-```
+## Hackathon note
 
-## Build & Deploy
+These two tasks test CUDA-writing capabilities: fusion, optimization, parity against reference implementations, and speed against hidden golden kernels.
 
-```bash
-hud deploy .
-hud sync tasks <taskset-name>
-```
+The intended longer-term direction is to automatically generate golden reference kernel sets through a framework such as TileRT, CODA kernels, or similar, expose profiler traces to the agent, and train agents to reach near-optimal kernels within limited iterations through hardware-aware reasoning. The asymmetry is intentional: the framework can use well-tuned generated or hand-crafted kernels, while the agent must compress that design space into a few edits and benchmark iterations.
 
-## Architecture
-
-Private [pytorch/torchtitan](https://github.com/pytorch/torchtitan) mirror with HUD evaluation layer on top.
-
-```
-env.py                    # Scenarios, grading harness, tool registration
-modal_runner.py           # Modal orchestrator (deploy, run tasks, tests, evals)
-torchtitan/               # Framework source (upstream fork)
-tasks/
-├── <slug>/task.py        # One package per task (prompt, graders, scenario args)
-├── graders/              # Reusable grader scripts (executed at grade time)
-├── mutations/            # Data/eval mutations (copied into Docker image)
-├── utils/                # Dataset builders, setup fixtures (copied into Docker image)
-└── tests/                # Structural + GPU integration tests
-```
-
-`env.py` defines scenarios and the grading harness. Grader scripts are embedded as strings in task args at import time and written to `/tmp/` at grade time -- no direct imports from `tasks/` at runtime.
-
-### What we own vs upstream
-
-| Layer | Paths | Notes |
-|-------|-------|-------|
-| **HUD evaluation** | `env.py`, `tasks/`, `Dockerfile.hud`, `modal_runner.py` | Safe to modify freely |
-| **Experiments** | `torchtitan/experiments/embedding/`, `torchtitan/experiments/vlm/` | Extend via `forward_backward_step` override |
-| **Model configs** | `torchtitan/models/flux/diagnostics.py`, `torchtitan/models/flux/config_registry.py` | Flux debug configs + diagnostics |
-
-Everything else under `torchtitan/` is upstream. Pull fixes via `git merge upstream/main`.
+I tested locally on a laptop 5070 Ti after hitting cloud GPU setup issues. I also tried fine-tuning Kimi K2.7 from local rollouts, but HUD's `openai_compatible` agent path did not expose file-writing/shell tools, so that RL signal could not be verified for Kimi through that route. The limited tool catalog is visible in [`hud/agents/openai_compatible/tools/__init__.py`](https://github.com/hud-evals/hud-python/blob/main/hud/agents/openai_compatible/tools/__init__.py). Since KernelBench-style tasks are not saturated, these environments should still have learnable signal once the model/tool interface is fixed.

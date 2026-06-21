@@ -1,0 +1,26 @@
+Posthoc golden comparison for HUD run 4
+
+Question: compare run-4 agent solution not only to SGLang, but also to the hand-written CUDA golden/reference implementation in tasks/sglang_dsv4_indexer/reference_solution_files.
+
+Reference golden command:
+rm -rf ~/.cache/torch_extensions/py312_cu128/dsv4_indexer_kernels && .venv/bin/python tasks/graders/check_dsv4_indexer_speed.py .
+
+Reference golden output:
+shape=DSV4IndexerShape(batch=64, heads=16, head_dim=128, rope_dim=64, max_seq_len=8192, dtype='bfloat16') eager_ms=1.1232 compiler_ms=0.0799 sglang_ms=0.1572 candidate_ms=0.0174 cand_vs_eager=64.494 cand_vs_sglang=9.026 parity={'sglang_vs_eager_q_max': 32.0, 'sglang_vs_eager_q_mean': 0.15914775431156158, 'sglang_vs_eager_w_max': 4.93892002850771e-07, 'sglang_vs_eager_w_mean': 5.733199515134402e-08, 'candidate_vs_sglang_q_max': 0.00390625, 'candidate_vs_sglang_q_mean': 2.9802322387695312e-08, 'candidate_vs_sglang_w_max': 8.731149137020111e-11, 'candidate_vs_sglang_w_mean': 7.926742595643077e-12}
+shape=DSV4IndexerShape(batch=256, heads=16, head_dim=128, rope_dim=64, max_seq_len=8192, dtype='bfloat16') eager_ms=1.0485 compiler_ms=0.0806 sglang_ms=0.1631 candidate_ms=0.0219 cand_vs_eager=47.885 cand_vs_sglang=7.447 parity={'sglang_vs_eager_q_max': 32.0, 'sglang_vs_eager_q_mean': 0.158145934343338, 'sglang_vs_eager_w_max': 8.460483513772488e-07, 'sglang_vs_eager_w_mean': 5.2334591771341366e-08, 'candidate_vs_sglang_q_max': 0.001953125, 'candidate_vs_sglang_q_mean': 3.725290298461914e-09, 'candidate_vs_sglang_w_max': 1.1641532182693481e-10, 'candidate_vs_sglang_w_mean': 8.39530528429222e-12}
+geomean_speedup_vs_eager=55.5722 geomean_vs_sglang=8.1987
+SCORE: 1.000000
+
+Run-4 agent command:
+rm -rf ~/.cache/torch_extensions/py312_cu128/dsv4_indexer_kernels && .venv/bin/python tasks/graders/check_dsv4_indexer_speed.py /tmp/hud_workspace_sglang_dsv4_4
+
+Run-4 agent output:
+shape=DSV4IndexerShape(batch=64, heads=16, head_dim=128, rope_dim=64, max_seq_len=8192, dtype='bfloat16') eager_ms=0.9606 compiler_ms=0.0823 sglang_ms=0.1187 candidate_ms=0.0341 cand_vs_eager=28.201 cand_vs_sglang=3.484 parity={'sglang_vs_eager_q_max': 32.0, 'sglang_vs_eager_q_mean': 0.15914775431156158, 'sglang_vs_eager_w_max': 4.93892002850771e-07, 'sglang_vs_eager_w_mean': 5.733199515134402e-08, 'candidate_vs_sglang_q_max': 0.00390625, 'candidate_vs_sglang_q_mean': 2.9802322387695312e-08, 'candidate_vs_sglang_w_max': 8.731149137020111e-11, 'candidate_vs_sglang_w_mean': 7.926742595643077e-12}
+shape=DSV4IndexerShape(batch=256, heads=16, head_dim=128, rope_dim=64, max_seq_len=8192, dtype='bfloat16') eager_ms=1.1708 compiler_ms=0.0838 sglang_ms=0.1186 candidate_ms=0.0139 cand_vs_eager=84.087 cand_vs_sglang=8.521 parity={'sglang_vs_eager_q_max': 32.0, 'sglang_vs_eager_q_mean': 0.158145934343338, 'sglang_vs_eager_w_max': 8.460483513772488e-07, 'sglang_vs_eager_w_mean': 5.2334591771341366e-08, 'candidate_vs_sglang_q_max': 0.001953125, 'candidate_vs_sglang_q_mean': 3.725290298461914e-09, 'candidate_vs_sglang_w_max': 1.1641532182693481e-10, 'candidate_vs_sglang_w_mean': 8.39530528429222e-12}
+geomean_speedup_vs_eager=48.6966 geomean_vs_sglang=5.4483
+SCORE: 1.000000
+
+Conclusion:
+- Run-4 agent solution is valid and beats SGLang.
+- Hand-written golden/reference CUDA remains faster overall on this rerun: geomean_vs_sglang 8.1987 vs 5.4483.
+- Difference is shape-dependent: agent is slower at batch=64/head=16 but faster at batch=256/head=16 in this specific rerun.
